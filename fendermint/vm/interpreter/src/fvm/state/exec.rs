@@ -23,7 +23,7 @@ use fvm_shared::{
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-use crate::fvm::externs::FendermintExterns;
+use crate::fvm::{examples::mycustomkernel::CustomKernelImpl, externs::FendermintExterns};
 use fendermint_vm_core::{chainid::HasChainID, Timestamp};
 use fendermint_vm_encoding::IsHumanReadable;
 
@@ -96,9 +96,7 @@ where
     DB: Blockstore + Clone + 'static,
 {
     #[allow(clippy::type_complexity)]
-    executor: DefaultExecutor<
-        DefaultKernel<DefaultCallManager<DefaultMachine<DB, FendermintExterns<DB>>>>,
-    >,
+    executor: DefaultExecutor<CustomKernelImpl<DefaultCallManager<DefaultMachine<DB, FendermintExterns>>>,
 
     /// Hash of the block currently being executed. For queries and checks this is empty.
     ///
