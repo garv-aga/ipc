@@ -5,7 +5,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use std::collections::HashMap;
 
-use fendermint_vm_actor_interface::{chainmetadata, cron, system};
+use fendermint_vm_actor_interface::{chainmetadata, cron, customsyscall, system};
 use fvm::executor::ApplyRet;
 use fvm_ipld_blockstore::Blockstore;
 use fvm_shared::{address::Address, ActorID, MethodNum, BLOCK_GAS_LIMIT};
@@ -54,25 +54,6 @@ where
     ) -> anyhow::Result<(Self::State, Self::BeginOutput)> {
         // Block height (FVM epoch) as sequence is intentional
         let height = state.block_height();
-
-        // check for upgrades in the upgrade_scheduler
-        let chain_id = state.chain_id();
-        let block_height: u64 = state.block_height().try_into().unwrap();
-        if let Some(upgrade) = self.upgrade_scheduler.get(chain_id, block_height) {
-            // TODO: consider using an explicit tracing enum for upgrades
-            tracing::info!(?chain_id, height = block_height, "Executing an upgrade");
-
-            // there is an upgrade scheduled for this height, lets run the migration
-            let res = upgrade.execute(&mut state).context("upgrade failed")?;
-            if let Some(new_app_version) = res {
-                state.update_app_version(|app_version| {
-                    *app_version = new_app_version;
-                });
-
-                tracing::info!(app_version = state.app_version(), "upgraded app version");
-            }
-        }
-
         // Arbitrarily large gas limit for cron (matching how Forest does it, which matches Lotus).
         // XXX: Our blocks are not necessarily expected to be 30 seconds apart, so the gas limit might be wrong.
         let gas_limit = BLOCK_GAS_LIMIT * 10000;
@@ -102,34 +83,57 @@ where
         }
 
         // Push the current block hash to the chainmetadata actor
-        if self.push_chain_meta {
-            if let Some(block_hash) = state.block_hash() {
-                let params = fvm_ipld_encoding::RawBytes::serialize(
-                    fendermint_actor_chainmetadata::PushBlockParams {
-                        epoch: height,
-                        block: block_hash,
-                    },
-                )?;
+        //
+        if let Some(block_hash) = state.block_hash() {
+            let params = fvm_ipld_encoding::RawBytes::serialize(
+                fendermint_actor_chainmetadata::PushBlockParams {
+                    epoch: height,
+                    block: block_hash,
+                },
+            )?;
 
-                let msg = FvmMessage {
-                    from: system::SYSTEM_ACTOR_ADDR,
-                    to: chainmetadata::CHAINMETADATA_ACTOR_ADDR,
-                    sequence: height as u64,
-                    gas_limit,
-                    method_num: fendermint_actor_chainmetadata::Method::PushBlockHash as u64,
-                    params,
-                    value: Default::default(),
-                    version: Default::default(),
-                    gas_fee_cap: Default::default(),
-                    gas_premium: Default::default(),
-                };
+            let msg = FvmMessage {
+                from: system::SYSTEM_ACTOR_ADDR,
+                to: chainmetadata::CHAINMETADATA_ACTOR_ADDR,
+                sequence: height as u64,
+                gas_limit,
+                method_num: fendermint_actor_chainmetadata::Method::PushBlockHash as u64,
+                params,
+                value: Default::default(),
+                version: Default::default(),
+                gas_fee_cap: Default::default(),
+                gas_premium: Default::default(),
+            };
 
-                let (apply_ret, _) = state.execute_implicit(msg)?;
+            let (apply_ret, _) = state.execute_implicit(msg)?;
 
-                if let Some(err) = apply_ret.failure_info {
-                    anyhow::bail!("failed to apply chainmetadata message: {}", err);
-                }
+            if let Some(err) = apply_ret.failure_info {
+                anyhow::bail!("failed to apply chainmetadata message: {}", err);
             }
+        }
+
+        {
+            let msg = FvmMessage {
+                from: system::SYSTEM_ACTOR_ADDR,
+                to: customsyscall::CUSTOMSYSCALL_ACTOR_ADDR,
+                sequence: height as u64,
+                gas_limit,
+                method_num: fendermint_actor_customsyscall::Method::Invoke as u64,
+                params: Default::default(),
+                value: Default::default(),
+                version: Default::default(),
+                gas_fee_cap: Default::default(),
+                gas_premium: Default::default(),
+            };
+
+            let (apply_ret, _) = state.execute_implicit(msg)?;
+
+            if let Some(err) = apply_ret.failure_info {
+                anyhow::bail!("failed to apply customsyscall message: {}", err);
+            }
+
+            let val: u64 = apply_ret.msg_receipt.return_data.deserialize().unwrap();
+            println!("customsyscall actor returned: {}", val);
         }
 
         let ret = FvmApplyRet {

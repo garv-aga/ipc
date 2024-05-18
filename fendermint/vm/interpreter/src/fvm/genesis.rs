@@ -247,21 +247,29 @@ where
             )
             .context("failed to create chainmetadata actor")?;
 
-        let eam_state = fendermint_actor_eam::State::new(
-            state.store(),
-            PermissionModeParams::from(genesis.eam_permission_mode),
-        )?;
+        // let eam_state = fendermint_actor_eam::State::new(
+        //     state.store(),
+        //     PermissionModeParams::from(genesis.eam_permission_mode),
+        // )?;
+        // state
+        //     .replace_builtin_actor(
+        //         eam::EAM_ACTOR_NAME,
+        //         eam::EAM_ACTOR_ID,
+        //         fendermint_actor_eam::IPC_EAM_ACTOR_NAME,
+        //         &eam_state,
+        //         TokenAmount::zero(),
+        //         None,
+        //     )
+        //     .context("failed to replace built in eam actor")?;
         state
-            .replace_builtin_actor(
-                eam::EAM_ACTOR_NAME,
-                eam::EAM_ACTOR_ID,
-                fendermint_actor_eam::IPC_EAM_ACTOR_NAME,
-                &eam_state,
-                TokenAmount::zero(),
-                None,
-            )
-            .context("failed to replace built in eam actor")?;
-
+        .create_custom_actor(
+            fendermint_actor_customsyscall::CUSTOMSYSCALL_ACTOR_NAME,
+            customsyscall::CUSTOMSYSCALL_ACTOR_ID,
+            &EMPTY_ARR,
+            TokenAmount::zero(),
+            None,
+        )
+        .context("failed to create customsyscall actor")?;
         // STAGE 2: Create non-builtin accounts which do not have a fixed ID.
 
         // The next ID is going to be _after_ the accounts, which have already been assigned an ID by the `Init` actor.
